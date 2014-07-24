@@ -21,7 +21,7 @@ def bdecode(benstr):
         return res, i+1
 
     def bdecode_dict(benstr, i):
-        res = {}
+        res = collections.OrderedDict()
         while i < len(benstr) and benstr[i] != 'e':
             new_key, i = bdecode_element(benstr, i)
             new_value, i = bdecode_element(benstr, i)
@@ -47,8 +47,8 @@ def bencode_dict(d):
     return 'd'+''.join([bencode(key)+bencode(value) for key, value in d.items()])+'e'
 
 def bencode(item):
-    dispatch = {int:bencode_int, list:bencode_list, str:bencode_str, dict:bencode_dict}
-    return dispatch[type(item)](item)
+    dispatch = {int:bencode_int, list:bencode_list, str:bencode_str}
+    return dispatch.get(type(item), bencode_dict)(item)
 
 def tests():
     # bdecoding tests
@@ -58,10 +58,10 @@ def tests():
     assert bdecode("i235e") == 235
 
     assert bdecode("l4:spam4:eggse") ==['spam', 'eggs']
-    assert bdecode("d4:spaml1:a1:bee") == {'spam': ['a', 'b']}
-    assert bdecode("d3:cow3:moo4:spam4:eggse") == {'cow': 'moo', 'spam': 'eggs'}
+    assert bdecode("d4:spaml1:a1:bee") == collections.OrderedDict({'spam': ['a', 'b']})
+    assert bdecode("d3:cow3:moo4:spam4:eggse") == collections.OrderedDict({'cow': 'moo', 'spam': 'eggs'})
     assert bdecode("d9:publisher3:bob17:publisher-webpage15:www.example.com18:publisher.location4:homee") ==\
-           {'publisher': 'bob', 'publisher-webpage': 'www.example.com', 'publisher.location': 'home'}
+           collections.OrderedDict({'publisher': 'bob', 'publisher-webpage': 'www.example.com', 'publisher.location': 'home'})
 
     # bencoding tests
 
@@ -79,6 +79,7 @@ def tests():
         import pprint
         pp = pprint.PrettyPrinter(indent=4)
         pp.pprint(d)
+    return d
 # with open("C:/flagfromserver.torrent", 'rb') as t:
 #     a = t.read()
 #     b = bencode(read_element(a, 0)[0])
@@ -88,14 +89,25 @@ def tests():
 #             print i, ord(a[i]), ord(b[i])
 
 def torrent_file_to_dict(filename):
+    """takes a filename
+    returns an ordered dictionary with parsed info"""
     with open(filename, 'rb') as f:
         return bdecode(f.read())
-with open("C:/flagfromserver.torrent", 'rb') as f:
-    bs = f.read()
-    sha = hashlib.sha1(bencode(sorted(bdecode(bs)['info'])))
+for torrent in ['C:/flagfromserver.torrent', 'C:/mininova.torrent', 'C:/rutorrent.torrent']:
+    print hashlib.sha1(bencode(torrent_file_to_dict(torrent)['info'])).hexdigest()
 
-# full_dict = torrent_file_to_dict("C:/flagfromserver.torrent")
-# info_hash = hashlib.sha1(bencode(full_dict['info']))
+def get_params(info):
+    """takes a dictionary parsed from a torrent file
+    returns a dictionary of parameters for request to server"""
+    info_hash = hashlib.sha1(bencode(info['info'])).hexdigest()
+    peer_id = '1406230005.05tom+cli'
+    uploaded = 0
+    compact = 1
+    event = 'started'
+    downloaded = 0
+    port = 6881
+    left = info['info']['length']
+    
 # peer_id =
 # params = {'info_hash', 'peer_id', 'port', 'uploaded', 'downloaded', 'left', 'compact',\
 #           'no_peer_id', 'event'}
