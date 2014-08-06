@@ -24,7 +24,7 @@ class Torrent():
         self.uploaded = 0
         self.downloaded = 0
         self.port = 6881 #how do I choose a port? randomly within the unreserved range?
-        self.filename = self.info['name'] #for now, single file only
+        self.filename = './'+self.info['name'] #for now, single file only
 
         #handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
         self.handshake = ''.join([chr(19), 'BitTorrent protocol', chr(0)*8, self.info_hash, self.peer_id])
@@ -76,10 +76,21 @@ class Torrent():
             peers.append(Peer(ip, port))
         return peers
 
+    def write(self, index, begin, data):
+        #write data to file
+        with open(self.filename, 'wb') as f:
+            f.seek(index*self.piece_len+begin)
+            f.write(data)
+        #update downloaded, blocks, pieces
+        self.downloaded += len(data)
+        self.blocks[index][begin/self.BLOCK_LEN] = True
+        if self.blocks[index].int == self.BLOCK_LEN:
+            self.pieces[index] == True
 
 class Peer():
 
-    def __init__(self, ip, port, peer_id = None):
+    def __init__(self, torrent, ip, port, peer_id = None):
+        self.torrent = torrent
         self.ip = ip
         self.port = port
         self.peer_id = peer_id
@@ -89,7 +100,7 @@ class Peer():
         self.choked = True
         self.interested = False
 
-        self.pieces = []
+        self.pieces = ''
         self.reply = ''
 
         self.requests = [] #array of tuples: piece, offset
@@ -103,73 +114,90 @@ class Peer():
             msg = struct.pack('B', MSG_TYPES.index(msg_type))+payload
         return struct.pack('>I', len(msg))+msg
 
+    def connect(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #make socket non-blocking
+        self.sock.setblocking(0)
+        self.sock.sendall(self.torrent.handshake)
+        try:
+            peer_handshake = self.sock.recv(68)
+            #TODO: verify peer_handshake
+            #update peer's status:
+            self.connected = True
+        except:
+            pass
+
     def request(self, piece):
         #send request
         piece_idx, offset, length = piece
         self.sock.sendall(self.encode_msg('request', struct.pack('>I I I',  piece_idx, offset, length)))
         #update self.requests
-
-    def connect(peer, torrent):
-        peer.sock = socket.socket()
-        #make socket non-blocking
-        peer.sock.sendall(torrent.handshake)
-        peer_handshake = peer.sock.recv(68)
-        #TODO: verify peer_handshake
-        #update peer's status:
-        peer.connected = True
+        self.requests.append((piece_idx, offset))
 
     def receive(self):
         """receive a reply from peer"""
         try:
-            reply = self.sock.recv(1000)
-            if reply:
-                self.reply += reply
+            self.reply += self.sock.recv(1024)
+            while self.reply:
                 msg_len = struct.unpack('>I', self.reply[:4])
                 if msg_len == 0:
-                    pass
+                    #TODO: keep alive: reset the timeout; update self.reply
+                    self.reply = self.reply[:4]
+                elif len(self.reply) >= msg_len+4:
+                    self.msg_processor(self.reply[4:4+msg_len])
+                    self.reply = self.reply[4+msg_len:]
                 else:
-                    self.msg_processor(self.reply[4:4+msg_len], self)
-                    self.reply = self.reply[:4+msg_len]
+                    break
         except:
-            print len(peer.reply), len(reply)
-    def msg_processor(self, msg_str, peer):
+            print len(self.reply)
+
+    def msg_processor(self, msg_str):
         msg = struct.unpack('B', msg_str[0])
+
         #choke
         if msg == 0:
-            peer.choked = True
+            self.choked = True
+
         #unchoke
         elif msg == 1:
-            peer.choked = False
+            self.choked = False
+
         #peer is interested
         elif msg == 2:
-            self.send_msg('unchoke')
+            self.sock.sendall(self.encode_msg('unchoke'))
+
         #peer is not interested
         elif msg == 3:
             pass
+
         #peer has piece #x
         elif msg == 4:
             #update info about peer's pieces
-            peer.pieces(msg_str[1:]) = True
+            piece_idx = struct.unpack('>I', msg_str[1:])
+            self.pieces[piece_idx] = True
+
         #bitfield msg
         elif msg == 5:
-            peer.has_pieces = msg_str[1:] #TODO: unpack and convert to a necessary data structure
+            self.pieces = BitArray(bytes=msg_str[1:])
+            del self.pieces[self.torrent.num_pieces:] #cut out unnecessary bits
+
         #request for a piece
         elif msg == 6:
             pass #TODO: implement sending a piece
             #locate requested piece, send it; update uploaded, advertise it other peers
+
         #piece
         elif msg == 7:
             index, begin = struct.unpack('>I I', msg_str[1:9])
-            self.f.seek(index*self.piece_len+begin)
-            self.f.write(msg_str[9:])
-            #update self.pieces, downloaded
+            self.torrent.write(index, begin, msg_str[9:])
+
         #cancel piece
         elif msg == 8:
             pass
+
         #port msg
         elif msg == 9:
             pass
         else:
             print 'unknown message:', msg, msg_str
-
 
