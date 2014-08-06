@@ -40,7 +40,7 @@ class Torrent():
         #Pieces/blocks data: pieces BitArray represents the pieces that I have;
         #blocks is a list of BitArray, each of which keeps track of downloaded blocks
         self.pieces = BitArray(bin='0'*self.num_pieces)
-        self.blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(len())]
+        self.blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(self.num_pieces)]
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
@@ -145,11 +145,12 @@ class Peer():
             pass
 
     def unchoke(self):
-        self.sock.sendall(self.encode_msg('unhoke'))
+        self.sock.sendall(self.encode_msg('unchoke'))
+
     def request(self, piece):
         #send request
         index, begin, length = piece
-        self.sock.sendall(self.encode_msg('request', struct.pack('>I I I',  piece_idx, offset, length)))
+        self.sock.sendall(self.encode_msg('request', struct.pack('>I I I', index, begin, length)))
         #update self.requests
         self.requests.append((index, begin))
 
