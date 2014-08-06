@@ -81,11 +81,27 @@ class Torrent():
         with open(self.filename, 'wb') as f:
             f.seek(index*self.piece_len+begin)
             f.write(data)
-        #update downloaded, blocks, pieces
+        #update downloaded (blocks and pieces are updated when request is made or fails)
         self.downloaded += len(data)
-        self.blocks[index][begin/self.BLOCK_LEN] = True
-        if self.blocks[index].int == self.BLOCK_LEN:
-            self.pieces[index] == True
+
+
+    def get_next_request(self, peer):
+        """
+        takes Torrent and Peer objects and finds the next block to download
+        """
+        diff = peer.pieces & ~self.pieces
+        #find next piece that the peer has and I don't have
+        piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
+        #find next block in that piece that I don't have
+        block_idx = next(i for i in range(self.blocks_per_piece) if self.blocks[piece_idx][i] == False)
+        offset = block_idx * self.BLOCK_LEN
+        length = min(self.BLOCK_LEN, self.piece_len - offset)
+        #update blocks and pieces
+        self.blocks[piece_idx][block_idx] = True
+        if self.blocks[piece_idx].int == self.BLOCK_LEN:
+            self.pieces[piece_idx] = True
+        return piece_idx, offset, length
+
 
 class Peer():
 
@@ -129,10 +145,10 @@ class Peer():
 
     def request(self, piece):
         #send request
-        piece_idx, offset, length = piece
+        index, begin, length = piece
         self.sock.sendall(self.encode_msg('request', struct.pack('>I I I',  piece_idx, offset, length)))
         #update self.requests
-        self.requests.append((piece_idx, offset))
+        self.requests.append((index, begin))
 
     def receive(self):
         """receive a reply from peer"""
@@ -198,6 +214,7 @@ class Peer():
         #port msg
         elif msg == 9:
             pass
+
         else:
             print 'unknown message:', msg, msg_str
 
