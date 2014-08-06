@@ -44,6 +44,7 @@ class Torrent():
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
+        self.active_peers = []
 
         self.num_connected = 0
         self.MAX_CONNECTIONS = MAX_CONNECTIONS
@@ -205,7 +206,10 @@ class Peer():
         #piece
         elif msg == 7:
             index, begin = struct.unpack('>I I', msg_str[1:9])
+            #write the file
             self.torrent.write(index, begin, msg_str[9:])
+            #update the peer's queue
+            self.requests.remove((index, begin))
 
         #cancel piece
         elif msg == 8:
