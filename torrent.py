@@ -7,8 +7,13 @@ import struct
 
 MAX_REQUESTS = 2
 MAX_CONNECTIONS = 2
-
+MSG_TYPES = ['choke', 'unchoke', 'interested', 'not_interested', 'have', 'bitfield', 'request', 'piece', 'cancel', 'port']
 class Torrent():
+    """
+    Keeps track of all information associated with a particular torrent file.
+    Gets and processes info from tracker, finding peers.
+    Keeps track of the pieces under download, figures out what to download next, writes to file.
+    """
 
     def __init__(self, torrent_file):
         self.torrent_data = bencoding.bdecode(open(torrent_file, 'rb').read())
@@ -32,8 +37,10 @@ class Torrent():
         self.last_piece_len = self.length % self.piece_len
         self.last_block_len = self.piece_len % self.BLOCK_LEN
         self.blocks_per_piece = self.piece_len / self.BLOCK_LEN + 1 * (self.last_block_len != 0)
-        #TODO: piece/block representation
+        #Pieces/blocks data: pieces BitArray represents the pieces that I have;
+        #blocks is a list of BitArray, each of which keeps track of downloaded blocks
         self.pieces = BitArray(bin='0'*self.num_pieces)
+        self.blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(len())]
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
@@ -76,6 +83,7 @@ class Peer():
         self.ip = ip
         self.port = port
         self.peer_id = peer_id
+        self.sock = None
 
         self.connected = False
         self.choked = True
@@ -88,6 +96,80 @@ class Peer():
         self.requested_pieces = [] #array of tuples representing pieces currently in work: (piece index, BitArray of blocks)
         self.MAX_REQUESTS = MAX_REQUESTS
 
+    def encode_msg(self, msg_type, payload=''):
+        if msg_type == 'keep alive':
+            msg = ''
+        else:
+            msg = struct.pack('B', MSG_TYPES.index(msg_type))+payload
+        return struct.pack('>I', len(msg))+msg
 
+    def request(self, piece):
+        #send request
+        piece_idx, offset, length = piece
+        self.sock.sendall(self.encode_msg('request', struct.pack('>I I I',  piece_idx, offset, length)))
+        #update self.requests
+
+    def connect(peer, torrent):
+        peer.sock = socket.socket()
+        #make socket non-blocking
+        peer.sock.sendall(torrent.handshake)
+        peer_handshake = peer.sock.recv(68)
+        #TODO: verify peer_handshake
+        #update peer's status:
+        peer.connected = True
+
+    def receive(self):
+        """receive a reply from peer"""
+        try:
+            reply = self.sock.recv(1000)
+            if reply:
+                self.reply += reply
+                msg_len = struct.unpack('>I', self.reply[:4])
+                if msg_len == 0:
+                    pass
+                else:
+                    self.msg_processor(self.reply[4:4+msg_len], self)
+                    self.reply = self.reply[:4+msg_len]
+        except:
+            print len(peer.reply), len(reply)
+    def msg_processor(self, msg_str, peer):
+        msg = struct.unpack('B', msg_str[0])
+        #choke
+        if msg == 0:
+            peer.choked = True
+        #unchoke
+        elif msg == 1:
+            peer.choked = False
+        #peer is interested
+        elif msg == 2:
+            self.send_msg('unchoke')
+        #peer is not interested
+        elif msg == 3:
+            pass
+        #peer has piece #x
+        elif msg == 4:
+            #update info about peer's pieces
+            peer.pieces(msg_str[1:]) = True
+        #bitfield msg
+        elif msg == 5:
+            peer.has_pieces = msg_str[1:] #TODO: unpack and convert to a necessary data structure
+        #request for a piece
+        elif msg == 6:
+            pass #TODO: implement sending a piece
+            #locate requested piece, send it; update uploaded, advertise it other peers
+        #piece
+        elif msg == 7:
+            index, begin = struct.unpack('>I I', msg_str[1:9])
+            self.f.seek(index*self.piece_len+begin)
+            self.f.write(msg_str[9:])
+            #update self.pieces, downloaded
+        #cancel piece
+        elif msg == 8:
+            pass
+        #port msg
+        elif msg == 9:
+            pass
+        else:
+            print 'unknown message:', msg, msg_str
 
 
