@@ -144,6 +144,8 @@ class Peer():
         except:
             pass
 
+    def unchoke(self):
+        self.sock.sendall(self.encode_msg('unhoke'))
     def request(self, piece):
         #send request
         index, begin, length = piece
