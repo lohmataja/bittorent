@@ -16,10 +16,11 @@ class Peer():
         self.sock = None
         self.handshake = ''
 
+        self.handshake_sent = False
         self.connected = False
         self.choked = True
         self.interested = False
-        self.queue = deque()
+        self.msg_queue = deque()
 
         self.pieces = BitArray(bin='0'*self.torrent.num_pieces)
         self.reply = ''
@@ -37,13 +38,17 @@ class Peer():
 
     def send_msg(self):
         try:
-            if not self.connected:
+            if not self.handshake_sent:
                 self.sock.sendall(self.torrent.handshake)
-                self.connected = True
-            elif self.choked:
-                self.sock.sendall(self.encode_msg('unchoke'))
-            else:
-                self.request(self.torrent.get_next_request(self))
+                self.handshake_sent = True
+                print 'Sent Handshake'
+            elif self.connected and self.choked:
+                self.sock.sendall(self.encode_msg('interested'))
+                print('Sent interested')
+            elif not self.choked:
+                new_request = self.torrent.get_next_request(self)
+                self.request(new_request)
+                print 'Requested', new_request
             return True
         except:
             return False
@@ -57,7 +62,7 @@ class Peer():
 
     def update_connected(self, handshake):
         #TODO: verify peer_handshake
-        print handshake
+        print 'Received handshake', handshake
         #update peer's status:
         self.connected = True
 
@@ -68,28 +73,32 @@ class Peer():
         #update self.requests
         self.requests.append((index, begin))
 
-    def receive(self):
+    def update_reply(self):
         """receive a reply from peer"""
         try:
             self.reply += self.sock.recv(1024)
-            while self.reply:
-                msg_len = struct.unpack('>I', self.reply[:4])[0]
-                if msg_len == 0:
-                    #TODO: keep alive: reset the timeout; update self.reply
-                    self.reply = self.reply[:4]
-                elif msg_len == 19 and self.reply[4:23] == 'Bittorent Protocol':
-                    self.update_connected(self.reply[:68])
-                    self.reply = self.reply[68:]
-                elif len(self.reply) >= (msg_len + 4):
-                    self.msg_processor(self.reply[4:4+msg_len])
-                    self.reply = self.reply[4+msg_len:]
-                else:
-                    try:
-                        self.reply += self.sock.recv(max(1024, msg_len - 4))
-                    except:
-                        break
+            print 'Updated reply', self.reply
         except socket.error:
             print socket.error
+    def process_reply(self):
+        print 'processing reply'
+        while self.reply:
+            msg_len = struct.unpack('>I', self.reply[:4])[0]
+            if msg_len == 0:
+                print 'Keep alive'
+                #TODO: keep alive: reset the timeout; update self.reply
+                self.reply = self.reply[:4]
+            elif msg_len == 19 and self.reply[4:23] == 'BitTorrent protocol':
+                self.update_connected(self.reply[:68])
+                self.reply = self.reply[68:]
+            elif len(self.reply) >= (msg_len + 4):
+                self.msg_processor(self.reply[4:4+msg_len])
+                self.reply = self.reply[4+msg_len:]
+            else:
+                try:
+                    self.reply += self.sock.recv(max(1024, msg_len - 4))
+                except:
+                    break
 
     def msg_processor(self, msg_str):
         print msg_str
