@@ -1,35 +1,49 @@
+import select
+import socket
+import pickle
+import torrent, peer
 
-from torrent import *
-from bitstring import BitArray
+def main_loop(torrent):
+    """
+    :param torrent: Torrent object
+    downloads the torrent
+    """
+    # initialize
+    inputs = []
+    outputs = []
 
-def download(torrent):
-    """
-    Takes a Torrent object and downloads the file
-    """
+    # main loop
+    # Add peers to connect to
     while torrent.get_left():
-        #up the connections
-        if torrent.num_connected < torrent.MAX_CONNECTIONS:
+        while len(inputs) < torrent.MAX_CONNECTIONS and torrent.peers:
+            peer = torrent.peers.pop() #get a new peer
+            peer.sock = socket.socket() #create a socket for him
+            peer.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #set socket reuse
+            peer.sock.setblocking(0) #make the socket non-blocking
             try:
-                new_peer = torrent.peers.pop(0)
-                new_peer.connect()
-                if new_peer.connected:
-                    torrent.active_peers.append(new_peer)
-                else:
-                    torrent.peers.append(new_peer)
+                peer.sock.connect((peer.ip, peer.port)) #connect
             except:
-                print 'connection problem'
+                print 'connection failed', peer.ip
+            inputs.append(peer)
+            outputs.append(peer)
 
-        #talk to active peers
-        for peer in torrent.active_peers:
-            if not peer.choked and len(peer.requests) < peer.MAX_REQUESTS:
-                new_request = torrent.get_next_request(peer)
-                peer.request(new_request)
-            else:
-                peer.unchoke()
+        #get what is ready
+        to_read, to_write, errors = select.select(inputs, outputs, inputs)
+        for peer in to_read:
+            peer.update_reply()
+            peer.process_reply()
+        for peer in to_write:
+            peer.send_msg()
 
-            peer.receive(torrent)
+def serialize(object, filename):
+    with open(filename, 'wb') as f:
+        pickle.dump(object, f)
+def deserialize(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
 
-
-# torrent_file = 'C:/flagfromserver.torrent'
-# t = Torrent(torrent_file)
-# download(t)
+tor_f = 'C:/flagfromserver.torrent'
+t = torrent.Torrent(tor_f)
+serialize(t, './torrentObj')
+# t = deserialize('./torrentObj')
+main_loop(t)
