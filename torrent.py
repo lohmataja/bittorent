@@ -1,12 +1,11 @@
 import bencoding
 import hashlib
 import requests
-import pickle
 from collections import deque
 from bitstring import BitArray
-from Peer import Peer
+from peer import Peer
 
-MAX_CONNECTIONS = 2
+MAX_CONNECTIONS = 1
 
 class Torrent():
     """
@@ -25,7 +24,8 @@ class Torrent():
         self.downloaded = 0
         self.port = 6881 #how do I choose a port? randomly within the unreserved range?
         self.filename = './'+self.info['name'] #for now, single file only
-
+        with open(self.filename, 'wb') as f:
+            pass
         #handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
         self.handshake = ''.join([chr(19), 'BitTorrent protocol', chr(0)*8, self.info_hash, self.peer_id])
 
@@ -79,9 +79,10 @@ class Torrent():
 
     def write(self, index, begin, data):
         #write data to file
-        with open(self.filename, 'wb') as f:
+        with open(self.filename, 'r+b') as f:
             f.seek(index*self.piece_len+begin)
             f.write(data)
+            print 'piece', index, begin, 'written'
         #update downloaded (blocks and pieces are updated when request is made or fails)
         self.downloaded += len(data)
 
@@ -92,13 +93,18 @@ class Torrent():
         """
         diff = peer.pieces & ~self.pieces
         #find next piece that the peer has and I don't have
-        piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
-        #find next block in that piece that I don't have
-        block_idx = next(i for i in range(self.blocks_per_piece) if self.blocks[piece_idx][i] == False)
+        try:
+            piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
+            print 'Next piece:', piece_idx, self.blocks[piece_idx].bin
+            #find next block in that piece that I don't have
+            block_idx = next(i for i in range(self.blocks_per_piece) if self.blocks[piece_idx][i] == False)
+            print block_idx
+        except StopIteration:
+            return None
         offset = block_idx * self.BLOCK_LEN
         length = min(self.BLOCK_LEN, self.piece_len - offset)
         #update blocks and pieces
         self.blocks[piece_idx][block_idx] = True
-        if self.blocks[piece_idx].int == self.BLOCK_LEN:
+        if self.blocks[piece_idx].count(1) == self.blocks_per_piece:
             self.pieces[piece_idx] = True
         return piece_idx, offset, length
