@@ -1,7 +1,8 @@
 import select
 import socket
 import pickle
-import torrent, peer
+from torrent import Torrent
+from peer import Peer
 
 def main_loop(torrent):
     """
@@ -19,7 +20,7 @@ def main_loop(torrent):
             peer = torrent.peers.pop() #get a new peer
             peer.sock = socket.socket() #create a socket for him
             peer.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #set socket reuse
-            peer.sock.setblocking(0) #make the socket non-blocking
+            peer.sock.setblocking(False) #make the socket non-blocking
             try:
                 peer.sock.connect((peer.ip, peer.port)) #connect
             except:
@@ -33,6 +34,7 @@ def main_loop(torrent):
             peer.update_reply()
             peer.process_reply()
         for peer in to_write:
+            peer.enqueue_msg()
             peer.send_msg()
 
 def serialize(object, filename):
@@ -43,7 +45,7 @@ def deserialize(filename):
         return pickle.load(f)
 
 tor_f = 'C:/flagfromserver.torrent'
-t = torrent.Torrent(tor_f)
-serialize(t, './torrentObj')
-# t = deserialize('./torrentObj')
+t = Torrent(tor_f)
+# serialize(t, './torrentObj')
 main_loop(t)
+# t = deserialize('./torrentObj')
