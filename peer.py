@@ -18,6 +18,7 @@ class Peer():
 
         self.handshake_sent = False
         self.connected = False
+        self.interested_sent = False
         self.choked = True
         self.interested = False
         self.msg_queue = deque()
@@ -28,6 +29,7 @@ class Peer():
         self.requests = [] #array of tuples: piece, offset
         self.requested_pieces = [] #array of tuples representing pieces currently in work: (piece index, BitArray of blocks)
         self.MAX_REQUESTS = MAX_REQUESTS
+        self.MAX_MSG_LEN = 2**15
 
     def fileno(self):
         """
@@ -36,22 +38,31 @@ class Peer():
         """
         return self.sock.fileno()
 
+    def enqueue_msg(self):
+        if not self.handshake_sent:
+            self.msg_queue.append(self.torrent.handshake)
+            self.handshake_sent = True
+            print 'Enq Handshake'
+        elif self.choked and not self.interested_sent:
+            self.msg_queue.append(self.encode_msg('interested'))
+            self.interested_sent = True
+            print('Enq interested')
+        elif not self.choked and len(self.requests) < self.MAX_REQUESTS:
+            new_request = self.torrent.get_next_request(self)
+            if new_request:
+                index, begin, length = new_request
+                self.msg_queue.append(self.encode_msg('request', struct.pack('>I I I', index, begin, length)))
+                #update self.requests
+                self.requests.append((index, begin))
+                print 'Enq request:', new_request
+
     def send_msg(self):
-        try:
-            if not self.handshake_sent:
-                self.sock.sendall(self.torrent.handshake)
-                self.handshake_sent = True
-                print 'Sent Handshake'
-            elif self.connected and self.choked:
-                self.sock.sendall(self.encode_msg('interested'))
-                print('Sent interested')
-            elif not self.choked:
-                new_request = self.torrent.get_next_request(self)
-                self.request(new_request)
-                print 'Requested', new_request
-            return True
-        except:
-            return False
+        while self.msg_queue:
+            try:
+                self.sock.sendall(self.msg_queue[0])
+                self.msg_queue.popleft()
+            except:
+                break
 
     def encode_msg(self, msg_type, payload=''):
         if msg_type == 'keep alive':
@@ -66,41 +77,34 @@ class Peer():
         #update peer's status:
         self.connected = True
 
-    def request(self, piece):
-        #send request
-        index, begin, length = piece
-        self.sock.sendall(self.encode_msg('request', struct.pack('>I I I', index, begin, length)))
-        #update self.requests
-        self.requests.append((index, begin))
-
     def update_reply(self):
         """receive a reply from peer"""
         try:
-            self.reply += self.sock.recv(1024)
-            print 'Updated reply', self.reply
+            self.reply += self.sock.recv(self.MAX_MSG_LEN)
         except socket.error:
             print socket.error
+        finally:
+            print(self.reply)
+
     def process_reply(self):
-        print 'processing reply'
-        while self.reply:
-            msg_len = struct.unpack('>I', self.reply[:4])[0]
-            if msg_len == 0:
-                print 'Keep alive'
-                #TODO: keep alive: reset the timeout; update self.reply
-                self.reply = self.reply[:4]
-            elif msg_len == 19 and self.reply[4:23] == 'BitTorrent protocol':
+        print 'processing reply', self.reply
+        while self.reply != '':
+            if ord(self.reply[0]) == 19 and self.reply[1:20] == 'BitTorrent protocol':
                 self.update_connected(self.reply[:68])
                 self.reply = self.reply[68:]
-            elif len(self.reply) >= (msg_len + 4):
-                self.msg_processor(self.reply[4:4+msg_len])
-                self.reply = self.reply[4+msg_len:]
             else:
-                try:
-                    self.reply += self.sock.recv(max(1024, msg_len - 4))
-                except:
+                msg_len = struct.unpack('>I', self.reply[:4])[0]
+                if msg_len == 0:
+                    print 'Keep alive'
+                    #TODO: keep alive: reset the timeout; update self.reply
+                    self.reply = self.reply[:4]
+                elif len(self.reply) >= (msg_len + 4):
+                    self.process_msg(self.reply[4:4+msg_len])
+                    self.reply = self.reply[4+msg_len:]
+                else:
                     break
 
-    def msg_processor(self, msg_str):
+    def process_msg(self, msg_str):
         print msg_str
         msg = struct.unpack('B', msg_str[0])[0]
         print MSG_TYPES[msg]
