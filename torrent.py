@@ -87,6 +87,11 @@ class Torrent():
         #update downloaded (blocks and pieces are updated when request is made or fails)
         self.downloaded += len(data)
 
+    def read(self, index, begin, length):
+        #currently not handling length discrepancies
+        with open(self.filename, 'r+b') as f:
+            f.seek(index*self.piece_len+begin)
+            return f.read(length)
 
     def get_next_request(self, peer):
         """
