@@ -33,8 +33,9 @@ class Torrent():
             else sum([f['length'] for f in self.info['files']])
         self.piece_len = self.info['piece length']
         self.BLOCK_LEN = 2**14
-        self.num_pieces = self.length/self.piece_len + 1
         self.last_piece_len = self.length % self.piece_len
+        self.num_pieces = self.length/self.piece_len + 1 * (self.last_piece_len != 0)
+        self.last_piece = self.num_pieces - 1
         self.last_block_len = self.piece_len % self.BLOCK_LEN
         self.blocks_per_piece = self.piece_len / self.BLOCK_LEN + 1 * (self.last_block_len != 0)
         #Pieces/blocks data: pieces BitArray represents the pieces that I have;
@@ -98,11 +99,11 @@ class Torrent():
             print 'Next piece:', piece_idx, self.blocks[piece_idx].bin
             #find next block in that piece that I don't have
             block_idx = next(i for i in range(self.blocks_per_piece) if self.blocks[piece_idx][i] == False)
-            print block_idx
+            # print block_idx
         except StopIteration:
             return None
         offset = block_idx * self.BLOCK_LEN
-        length = min(self.BLOCK_LEN, self.piece_len - offset)
+        length = self.last_piece_len if piece_idx == self.last_piece else min(self.BLOCK_LEN, self.piece_len - offset)
         #update blocks and pieces
         self.blocks[piece_idx][block_idx] = True
         if self.blocks[piece_idx].count(1) == self.blocks_per_piece:
