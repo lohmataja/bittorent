@@ -19,15 +19,17 @@ class Peer():
         self.handshake_sent = False
         self.connected = False
         self.interested_sent = False
-        self.choked = True
-        self.interested = False
+        self.is_chocking = True
+        self.am_interested = False
+        self.am_choking = True
+        self.is_interested = False
         self.msg_queue = deque()
 
         self.pieces = BitArray(bin='0'*self.torrent.num_pieces)
         self.reply = ''
 
         self.requests = [] #array of tuples: piece, offset
-        self.requested_pieces = [] #array of tuples representing pieces currently in work: (piece index, BitArray of blocks)
+        self.requested_pieces = [] #array of tuples representing need_pieces currently in work: (piece index, BitArray of need_blocks)
         self.MAX_REQUESTS = MAX_REQUESTS
         self.MAX_MSG_LEN = 2**15
 
@@ -43,11 +45,11 @@ class Peer():
             self.msg_queue.append(self.torrent.handshake)
             self.handshake_sent = True
             print 'Enq Handshake'
-        elif self.choked and not self.interested_sent:
+        elif self.is_chocking and not self.interested_sent:
             self.msg_queue.append(self.encode_msg('interested'))
             self.interested_sent = True
             print('Enq interested')
-        elif not self.choked and len(self.requests) < self.MAX_REQUESTS:
+        elif not self.is_chocking and len(self.requests) < self.MAX_REQUESTS:
             new_request = self.torrent.get_next_request(self)
             if new_request:
                 index, begin, length = new_request
@@ -106,11 +108,11 @@ class Peer():
         print MSG_TYPES[msg]
         #choke
         if msg == 0:
-            self.choked = True
+            self.is_chocking = True
 
         #unchoke
         elif msg == 1:
-            self.choked = False
+            self.is_chocking = False
 
         #peer is interested
         elif msg == 2:
@@ -122,7 +124,7 @@ class Peer():
 
         #peer has piece #x
         elif msg == 4:
-            #update info about peer's pieces
+            #update info about peer's need_pieces
             piece_idx = struct.unpack('>I', msg_str[1:])[0]
             self.pieces[piece_idx] = True
 
