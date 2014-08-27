@@ -114,6 +114,6 @@ class Torrent():
         length = self.last_piece_len if piece_idx == self.last_piece else min(self.block_len, self.piece_len - offset)
         #update need_blocks and need_pieces
         self.need_blocks[piece_idx][block_idx] = False
-        if self.need_blocks[piece_idx].count(1) == self.blocks_per_piece:
+        if self.need_blocks[piece_idx].count(1) == 0:
             self.need_pieces[piece_idx] = False
         return piece_idx, offset, length
