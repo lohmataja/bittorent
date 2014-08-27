@@ -5,13 +5,15 @@ from collections import deque
 from bitstring import BitArray
 from peer import Peer
 
-MAX_CONNECTIONS = 1
+MAX_OUTGOING_CONNECTIONS = 1
+MAX_INCOMING_CONNECTIONS = 1
+BLOCK_LEN = 2**14
 
 class Torrent():
     """
     Keeps track of all information associated with a particular torrent file.
     Gets and processes info from tracker, finding peers.
-    Keeps track of the pieces under download, figures out what to download next, writes to file.
+    Keeps track of the need_pieces under download, figures out what to download next, writes to file.
     """
 
     def __init__(self, torrent_file):
@@ -32,23 +34,24 @@ class Torrent():
         self.length = self.info['length'] if 'length' in self.info.keys() \
             else sum([f['length'] for f in self.info['files']])
         self.piece_len = self.info['piece length']
-        self.BLOCK_LEN = 2**14
+        self.block_len = BLOCK_LEN
+
         self.last_piece_len = self.length % self.piece_len
         self.num_pieces = self.length/self.piece_len + 1 * (self.last_piece_len != 0)
         self.last_piece = self.num_pieces - 1
-        self.last_block_len = self.piece_len % self.BLOCK_LEN
-        self.blocks_per_piece = self.piece_len / self.BLOCK_LEN + 1 * (self.last_block_len != 0)
-        #Pieces/blocks data: pieces BitArray represents the pieces that I have;
-        #blocks is a list of BitArray, each of which keeps track of downloaded blocks
-        self.pieces = BitArray(bin='0'*self.num_pieces)
-        self.blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(self.num_pieces)]
+        self.last_block_len = self.piece_len % self.block_len
+        self.blocks_per_piece = self.piece_len / self.block_len + 1 * (self.last_block_len != 0)
+        #Pieces/need_blocks data: need_pieces BitArray represents the need_pieces that I have;
+        #need_blocks is a list of BitArray, each of which keeps track of downloaded need_blocks
+        self.need_pieces = BitArray(bin='1'*self.num_pieces)
+        self.need_blocks = [BitArray(bin='1'*self.blocks_per_piece) for i in range(self.num_pieces)]
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
         self.active_peers = []
 
         self.num_connected = 0
-        self.MAX_CONNECTIONS = MAX_CONNECTIONS
+        self.MAX_CONNECTIONS = MAX_OUTGOING_CONNECTIONS
         self.requests = []
 
     def get_left(self):
@@ -84,7 +87,7 @@ class Torrent():
             f.seek(index*self.piece_len+begin)
             f.write(data)
             print 'piece', index, begin, 'written'
-        #update downloaded (blocks and pieces are updated when request is made or fails)
+        #update downloaded (need_blocks and need_pieces are updated when request is made or fails)
         self.downloaded += len(data)
 
     def read(self, index, begin, length):
@@ -97,20 +100,20 @@ class Torrent():
         """
         takes Torrent and Peer objects and finds the next block to download
         """
-        diff = peer.pieces & ~self.pieces
+        diff = peer.pieces & self.need_pieces
         #find next piece that the peer has and I don't have
         try:
             piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
-            print 'Next piece:', piece_idx, self.blocks[piece_idx].bin
+            print 'Next piece:', piece_idx, self.need_blocks[piece_idx].bin
             #find next block in that piece that I don't have
-            block_idx = next(i for i in range(self.blocks_per_piece) if self.blocks[piece_idx][i] == False)
+            block_idx = next(i for i in range(self.blocks_per_piece) if self.need_blocks[piece_idx][i] == True)
             # print block_idx
         except StopIteration:
             return None
-        offset = block_idx * self.BLOCK_LEN
-        length = self.last_piece_len if piece_idx == self.last_piece else min(self.BLOCK_LEN, self.piece_len - offset)
-        #update blocks and pieces
-        self.blocks[piece_idx][block_idx] = True
-        if self.blocks[piece_idx].count(1) == self.blocks_per_piece:
-            self.pieces[piece_idx] = True
+        offset = block_idx * self.block_len
+        length = self.last_piece_len if piece_idx == self.last_piece else min(self.block_len, self.piece_len - offset)
+        #update need_blocks and need_pieces
+        self.need_blocks[piece_idx][block_idx] = False
+        if self.need_blocks[piece_idx].count(1) == self.blocks_per_piece:
+            self.need_pieces[piece_idx] = False
         return piece_idx, offset, length
