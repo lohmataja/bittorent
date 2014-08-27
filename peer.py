@@ -83,11 +83,8 @@ class Peer():
             self.reply += self.sock.recv(self.MAX_MSG_LEN)
         except socket.error:
             print socket.error
-        finally:
-            print(self.reply)
 
     def process_reply(self):
-        print 'processing reply', self.reply
         while self.reply != '':
             if ord(self.reply[0]) == 19 and self.reply[1:20] == 'BitTorrent protocol':
                 self.update_connected(self.reply[:68])
@@ -105,7 +102,6 @@ class Peer():
                     break
 
     def process_msg(self, msg_str):
-        print msg_str
         msg = struct.unpack('B', msg_str[0])[0]
         print MSG_TYPES[msg]
         #choke
@@ -138,7 +134,14 @@ class Peer():
         #request for a piece
         elif msg == 6:
             pass #TODO: implement sending a piece
-            #locate requested piece, send it; update uploaded, advertise it other peers
+            #locate requested piece, send it
+            index, begin, length = struct.unpack('>I I I', msg_str[1:])
+            #read the data
+            data = self.torrent.read(index, begin, length)
+            if data: #if read is successful
+                self.enqueue_msg(self.encode_msg('piece', struct.pack('>I I', index, begin) + data))
+            #update uploaded
+            self.torrent.uploaded += length
 
         #piece
         elif msg == 7:
