@@ -41,17 +41,20 @@ class Torrent():
         self.last_piece = self.num_pieces - 1
         self.last_block_len = self.piece_len % self.block_len
         self.blocks_per_piece = self.piece_len / self.block_len + 1 * (self.last_block_len != 0)
-        #Pieces/need_blocks data: need_pieces BitArray represents the need_pieces that I have;
-        #need_blocks is a list of BitArray, each of which keeps track of downloaded need_blocks
+        #Pieces/need_blocks data: need_pieces BitArray represents the pieces that I need and have not requested;
+        #need_blocks is a list of BitArray, each of which keeps track of blocks not yet requested
         self.need_pieces = BitArray(bin='1'*self.num_pieces)
         self.need_blocks = [BitArray(bin='1'*self.blocks_per_piece) for i in range(self.num_pieces)]
+        self.have_pieces = BitArray(bin='0'*self.num_pieces)
+        self.have_blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(self.num_pieces)]
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
         self.active_peers = []
 
         self.num_connected = 0
-        self.MAX_CONNECTIONS = MAX_OUTGOING_CONNECTIONS
+        self.max_outgoing_connections = MAX_OUTGOING_CONNECTIONS
+        self.max_incoming_connections = MAX_INCOMING_CONNECTIONS
         self.requests = []
 
     def get_left(self):
@@ -87,8 +90,11 @@ class Torrent():
             f.seek(index*self.piece_len+begin)
             f.write(data)
             print 'piece', index, begin, 'written'
-        #update downloaded (need_blocks and need_pieces are updated when request is made or fails)
+        #update downloaded, have_blocks and have_pieces
         self.downloaded += len(data)
+        self.have_blocks[index][begin/self.block_len] = True
+        if self.have_blocks[index].count(0) == 0:
+            self.have_pieces[index] = True
 
     def read(self, index, begin, length):
         #currently not handling length discrepancies
