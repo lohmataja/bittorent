@@ -24,7 +24,7 @@ def main_loop(torrent):
             try:
                 peer.sock.connect((peer.ip, peer.port)) #connect
             except:
-                print 'connection failed', peer.ip
+                print('connection failed', peer.ip)
             inputs.append(peer)
             outputs.append(peer)
 
@@ -36,6 +36,14 @@ def main_loop(torrent):
         for peer in to_write:
             peer.enqueue_msg()
             peer.send_msg()
+        for peer in errors:
+            #remove peer from select's queue
+            inputs.remove(peer)
+            outputs.remove(peer)
+            #put the peer in the back of the torrent's queue of peers
+            torrent.peers.appendleft(peer)
+            #reset peer's values and queues
+            peer.teardown()
 
 def serialize(object, filename):
     with open(filename, 'wb') as f:
