@@ -18,7 +18,6 @@ class Peer():
 
         self.handshake_sent = False
         self.connected = False
-        self.interested_sent = False
         self.is_chocking = True
         self.am_interested = False
         self.am_choking = True
@@ -29,7 +28,6 @@ class Peer():
         self.reply = ''
 
         self.requests = [] #array of tuples: piece, offset
-        self.requested_pieces = [] #array of tuples representing need_pieces currently in work: (piece index, BitArray of need_blocks)
         self.MAX_REQUESTS = MAX_REQUESTS
         self.MAX_MSG_LEN = 2**15
 
@@ -44,19 +42,22 @@ class Peer():
         if not self.handshake_sent:
             self.msg_queue.append(self.torrent.handshake)
             self.handshake_sent = True
-            print 'Enq Handshake'
-        elif self.is_chocking and not self.interested_sent:
-            self.msg_queue.append(self.encode_msg('interested'))
-            self.interested_sent = True
-            print('Enq interested')
+            print('Enq Handshake')
+        elif not self.am_interested:
+            if (self.pieces & self.torrent.need_pieces):
+                self.am_interested = True
+                self.msg_queue.append(self.encode_msg('interested'))
+                print('Enq interested')
+            else:
+                print(self.pieces & self.torrent.need_pieces)
         elif not self.is_chocking and len(self.requests) < self.MAX_REQUESTS:
             new_request = self.torrent.get_next_request(self)
             if new_request:
                 index, begin, length = new_request
-                self.msg_queue.append(self.encode_msg('request', struct.pack('>I I I', index, begin, length)))
+                self.msg_queue.append(self.encode_msg('request', bytes([index, begin, length])))
                 #update self.requests
                 self.requests.append((index, begin))
-                print 'Enq request:', new_request
+                print('Enq request:', new_request)
 
     def send_msg(self):
         while self.msg_queue:
@@ -66,7 +67,7 @@ class Peer():
             except:
                 break
 
-    def encode_msg(self, msg_type, payload=''):
+    def encode_msg(self, msg_type, payload=b''):
         if msg_type == 'keep alive':
             msg = ''
         else:
@@ -75,7 +76,7 @@ class Peer():
 
     def update_connected(self, handshake):
         #TODO: verify peer_handshake
-        print 'Received handshake', handshake
+        print('Received handshake', handshake)
         #update peer's status:
         self.connected = True
 
@@ -84,7 +85,7 @@ class Peer():
         try:
             self.reply += self.sock.recv(self.MAX_MSG_LEN)
         except socket.error:
-            print socket.error
+            print(socket.error)
 
     def process_reply(self):
         while self.reply != '':
@@ -94,7 +95,7 @@ class Peer():
             else:
                 msg_len = struct.unpack('>I', self.reply[:4])[0]
                 if msg_len == 0:
-                    print 'Keep alive'
+                    print('Keep alive')
                     #TODO: keep alive: reset the timeout; update self.reply
                     self.reply = self.reply[:4]
                 elif len(self.reply) >= (msg_len + 4):
@@ -105,7 +106,7 @@ class Peer():
 
     def process_msg(self, msg_str):
         msg = struct.unpack('B', msg_str[0])[0]
-        print MSG_TYPES[msg]
+        print(MSG_TYPES[msg])
         #choke
         if msg == 0:
             self.is_chocking = True
@@ -162,4 +163,13 @@ class Peer():
             pass
 
         else:
-            print 'unknown message:', msg, msg_str
+            print('unknown message:', msg, msg_str)
+
+    def teardown(self):
+        for index, offset in self.requests:
+            if self.torrent.need_blocks[index].count(1) == 0:
+                self.torrent.need_pieces[index] = True
+            self.torrent.need_blocks[index][offset/self.torrent.block_len] = True
+        #reset values
+        self.handshake_sent = False
+        self.
