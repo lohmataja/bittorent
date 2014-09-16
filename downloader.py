@@ -4,17 +4,25 @@ import pickle
 from torrent import Torrent
 from peer import Peer
 
+HOST = '0.0.0.0'
+PORT = 6886
+
 def main_loop(torrent):
     """
     :param torrent: Torrent object
     downloads the torrent
     """
     # initialize
-    inputs = []
-    outputs = []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((HOST, PORT))
+    sock.listen(5)
 
-    # main loop
-    # Add peers to connect to
+    inputs = [sock]
+    outputs = [sock]
+
+
+    # event loop
     while torrent.get_left():
         while len(inputs) < torrent.MAX_CONNECTIONS and torrent.peers:
             peer = torrent.peers.pop() #get a new peer
@@ -23,7 +31,7 @@ def main_loop(torrent):
             peer.sock.setblocking(False) #make the socket non-blocking
             try:
                 peer.sock.connect((peer.ip, peer.port)) #connect
-            except:
+            except socket.error:
                 print('connection failed', peer.ip)
             inputs.append(peer)
             outputs.append(peer)
@@ -31,7 +39,7 @@ def main_loop(torrent):
         #get what is ready
         to_read, to_write, errors = select.select(inputs, outputs, inputs)
         for peer in to_read:
-            peer.update_reply()
+            peer.receive_data()
             peer.process_reply()
         for peer in to_write:
             peer.enqueue_msg()
