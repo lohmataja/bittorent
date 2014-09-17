@@ -13,13 +13,13 @@ def main_loop(torrent):
     downloads the torrent
     """
     # initialize
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((HOST, PORT))
-    sock.listen(5)
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind((HOST, PORT))
+    listener.listen(5)
 
-    inputs = [sock]
-    outputs = [sock]
+    inputs = [listener]
+    outputs = [listener]
 
 
     # event loop
@@ -33,25 +33,38 @@ def main_loop(torrent):
                 peer.sock.connect((peer.ip, peer.port)) #connect
             except socket.error:
                 print('connection failed', peer.ip)
+            #set peer's status
+            peer.state = 'sending_to_wait'
             inputs.append(peer)
             outputs.append(peer)
 
         #get what is ready
         to_read, to_write, errors = select.select(inputs, outputs, inputs)
-        for peer in to_read:
-            peer.receive_data()
-            peer.process_reply()
-        for peer in to_write:
-            peer.enqueue_msg()
-            peer.send_msg()
-        for peer in errors:
+        for item in to_read:
+            #TODO: accept only if doesn't exceed max_incoming_connections
+            if item == listener:
+                new_peer_sock, new_peer_address = listener.accept()
+                new_peer_sock.setblocking(False)
+                #create new peer
+                new_peer = Peer(torrent, *new_peer_address)
+                #give it the newly created sock
+                new_peer.sock = new_peer_sock
+                #set state
+                new_peer.state = 'waiting_to_send'
+            else: #It's a peer!
+                item.receive_data()
+                item.process_reply()
+        for item in to_write: #to_write only contains peers
+            item.enqueue_msg()
+            item.send_msg()
+        for item in errors:
             #remove peer from select's queue
-            inputs.remove(peer)
-            outputs.remove(peer)
+            inputs.remove(item)
+            outputs.remove(item)
             #put the peer in the back of the torrent's queue of peers
-            torrent.peers.appendleft(peer)
+            torrent.peers.appendleft(item)
             #reset peer's values and queues
-            peer.teardown()
+            item.teardown()
 
 def serialize(object, filename):
     with open(filename, 'wb') as f:
@@ -62,6 +75,4 @@ def deserialize(filename):
 
 tor_f = 'C:/flagfromserver.torrent'
 t = Torrent(tor_f)
-# serialize(t, './torrentObj')
 main_loop(t)
-# t = deserialize('./torrentObj')
