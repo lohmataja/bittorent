@@ -6,6 +6,7 @@ from bitstring import BitArray
 MAX_REQUESTS = 2
 MSG_TYPES = ['choke', 'unchoke', 'interested', 'not_interested', 'have', 'bitfield', 'request', 'piece', 'cancel', 'port']
 
+
 class Peer():
 
     def __init__(self, torrent, ip, port, peer_id = None):
@@ -16,8 +17,7 @@ class Peer():
         self.sock = None
         self.handshake = ''
 
-        self.handshake_sent = False
-        self.connected = False
+        self.state = None
         self.is_chocking = True
         self.am_interested = False
         self.am_choking = True
@@ -38,18 +38,23 @@ class Peer():
         """
         return self.sock.fileno()
 
+    def encode_msg(self, msg_type, payload=b''):
+        if msg_type == 'keep alive':
+            msg = ''
+        else:
+            msg = struct.pack('B', MSG_TYPES.index(msg_type))+payload
+        return struct.pack('>I', len(msg))+msg
+
     def enqueue_msg(self):
-        if not self.handshake_sent:
+        if self.state == 'sending_to_wait':
             self.msg_queue.append(self.torrent.handshake)
-            self.handshake_sent = True
+            self.state = 'waiting'
             print('Enq Handshake')
         elif not self.am_interested:
             if (self.pieces & self.torrent.need_pieces):
                 self.am_interested = True
                 self.msg_queue.append(self.encode_msg('interested'))
                 print('Enq interested')
-            else:
-                print(self.pieces & self.torrent.need_pieces)
         elif not self.is_chocking and len(self.requests) < self.MAX_REQUESTS:
             new_request = self.torrent.get_next_request(self)
             if new_request:
@@ -58,29 +63,17 @@ class Peer():
                 #update self.requests
                 self.requests.append((index, begin))
                 print('Enq request:', new_request)
+        #TODO: keep track of timeout, send KEEP_ALIVE messages as needed
 
     def send_msg(self):
         while self.msg_queue:
             try:
                 self.sock.sendall(self.msg_queue[0])
                 self.msg_queue.popleft()
-            except:
+            except socket.error:
                 break
 
-    def encode_msg(self, msg_type, payload=b''):
-        if msg_type == 'keep alive':
-            msg = ''
-        else:
-            msg = struct.pack('B', MSG_TYPES.index(msg_type))+payload
-        return struct.pack('>I', len(msg))+msg
-
-    def update_connected(self, handshake):
-        #TODO: verify peer_handshake
-        print('Received handshake', handshake)
-        #update peer's status:
-        self.connected = True
-
-    def update_reply(self):
+    def receive_data(self):
         """receive a reply from peer"""
         try:
             self.reply += self.sock.recv(self.MAX_MSG_LEN)
@@ -90,7 +83,7 @@ class Peer():
     def process_reply(self):
         while self.reply != '':
             if ord(self.reply[0]) == 19 and self.reply[1:20] == 'BitTorrent protocol':
-                self.update_connected(self.reply[:68])
+                self.process_handshake(self.reply[:68])
                 self.reply = self.reply[68:]
             else:
                 msg_len = struct.unpack('>I', self.reply[:4])[0]
@@ -104,6 +97,17 @@ class Peer():
                 else:
                     break
 
+    def process_handshake(self, handshake):
+        #TODO: verify peer_handshake
+        print('Received handshake', handshake)
+        #send h/sh as needed:
+        if self.state == "waiting_to_send":
+            self.msg_queue.append(self.torrent.handshake)
+        #send bitfield
+        self.msg_queue.append(self.encode_msg('bitfield', self.torrent.have_pieces.bytes))
+        #update status
+        self.state = "connected"
+
     def process_msg(self, msg_str):
         msg = struct.unpack('B', msg_str[0])[0]
         print(MSG_TYPES[msg])
@@ -115,13 +119,15 @@ class Peer():
         elif msg == 1:
             self.is_chocking = False
 
-        #peer is interested
+        #interested
         elif msg == 2:
+            #TODO: check number of outgoing connections before unchoking
             self.sock.sendall(self.encode_msg('unchoke'))
 
-        #peer is not interested
+        #not interested
         elif msg == 3:
-            pass
+            self.is_interested = False
+            #TODO: choke peer, decrement number of outgoing connections
 
         #peer has piece #x
         elif msg == 4:
@@ -136,15 +142,16 @@ class Peer():
 
         #request for a piece
         elif msg == 6:
-            pass #TODO: implement sending a piece
-            #locate requested piece, send it
-            index, begin, length = struct.unpack('>I I I', msg_str[1:])
-            #read the data
-            data = self.torrent.read(index, begin, length)
-            if data: #if read is successful
-                self.enqueue_msg(self.encode_msg('piece', struct.pack('>I I', index, begin) + data))
-            #update uploaded
-            self.torrent.uploaded += length
+            #check that not choking
+            if not self.am_choking:
+                #locate requested piece, send it
+                index, begin, length = struct.unpack('>I I I', msg_str[1:])
+                #read the data
+                data = self.torrent.read(index, begin, length)
+                if data: #if read is successful
+                    self.enqueue_msg(self.encode_msg('piece', struct.pack('>I I', index, begin) + data))
+                #update uploaded
+                self.torrent.uploaded += length
 
         #piece
         elif msg == 7:
@@ -171,5 +178,8 @@ class Peer():
                 self.torrent.need_pieces[index] = True
             self.torrent.need_blocks[index][offset/self.torrent.block_len] = True
         #reset values
-        self.handshake_sent = False
-        self.
+        self.state = None
+        self.am_interested = False
+        self.is_chocking = True
+        self.is_interested = False
+        self.am_choking = True
