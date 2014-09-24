@@ -24,7 +24,7 @@ def main_loop(torrent):
 
     # event loop
     while torrent.get_left():
-        while len(inputs) < torrent.MAX_CONNECTIONS and torrent.peers:
+        while len(inputs) < torrent.max_outgoing_connections and torrent.peers:
             peer = torrent.peers.pop() #get a new peer
             peer.sock = socket.socket() #create a socket for him
             peer.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #set socket reuse
@@ -41,16 +41,16 @@ def main_loop(torrent):
         #get what is ready
         to_read, to_write, errors = select.select(inputs, outputs, inputs)
         for item in to_read:
-            #TODO: accept only if doesn't exceed max_incoming_connections
             if item == listener:
-                new_peer_sock, new_peer_address = listener.accept()
-                new_peer_sock.setblocking(False)
-                #create new peer
-                new_peer = Peer(torrent, *new_peer_address)
-                #give it the newly created sock
-                new_peer.sock = new_peer_sock
-                #set state
-                new_peer.state = 'waiting_to_send'
+                if torrent.max_incoming_connections:
+                    new_peer_sock, new_peer_address = listener.accept()
+                    new_peer_sock.setblocking(False)
+                    #create new peer
+                    new_peer = Peer(torrent, *new_peer_address)
+                    #give it the newly created sock
+                    new_peer.sock = new_peer_sock
+                    #set state
+                    new_peer.state = 'waiting_to_send'
             else: #It's a peer!
                 item.receive_data()
                 item.process_reply()
@@ -66,12 +66,6 @@ def main_loop(torrent):
             #reset peer's values and queues
             item.teardown()
 
-def serialize(object, filename):
-    with open(filename, 'wb') as f:
-        pickle.dump(object, f)
-def deserialize(filename):
-    with open(filename, 'rb') as f:
-        return pickle.load(f)
 
 tor_f = 'C:/flagfromserver.torrent'
 t = Torrent(tor_f)
