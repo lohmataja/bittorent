@@ -1,12 +1,11 @@
 import bencoding
 import hashlib
 import requests
-from collections import deque
+from collections import deque, defaultdict
 from bitstring import BitArray
 from peer import Peer
 
-MAX_OUTGOING_CONNECTIONS = 1
-MAX_INCOMING_CONNECTIONS = 1
+MAX_CONNECTIONS = 4
 BLOCK_LEN = 2**14
 
 class Torrent():
@@ -47,18 +46,37 @@ class Torrent():
         self.need_blocks = [BitArray(bin='1'*self.blocks_per_piece) for i in range(self.num_pieces)]
         self.have_pieces = BitArray(bin='0'*self.num_pieces)
         self.have_blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(self.num_pieces)]
+        self.pieces = {}  # index : array of blocks
+        self.piece_hashes = self.get_piece_hashes()
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
         self.active_peers = []
 
         self.num_connected = 0
-        self.max_outgoing_connections = MAX_OUTGOING_CONNECTIONS
-        self.max_incoming_connections = MAX_INCOMING_CONNECTIONS
-        self.requests = []
+        self.max_connections = MAX_CONNECTIONS
+        self.requests = defaultdict(self.blocklist)
 
-    def get_left(self):
+    def blocklist(self):
+        return [[] for i in range(self.blocks_per_piece)]
+
+    def get_piece_hashes(self):
+        hashes = self.info["pieces"]
+        return [hashes[i:i + 20] for i in range(len(hashes))]
+
+    @property
+    def left(self):
         return self.length - self.downloaded
+
+    @property
+    def is_incomplete(self):
+        return self.left > 0
+
+    def offset_to_index(self, offset):
+        return offset / self.block_len
+
+    def index_to_offset(self, index):
+        return index * self.block_len
 
     def get_params(self):
         return {'info_hash':self.info_hash,
@@ -66,7 +84,7 @@ class Torrent():
                 'uploaded':self.uploaded,
                 'downloaded':self.downloaded,
                 'port':self.port,
-                'left':self.get_left(),
+                'left': self.left,
                 'compact':1,
                 'event':'started'}
 
@@ -84,17 +102,34 @@ class Torrent():
             peers.append(Peer(self, ip, port))
         return peers
 
-    def write(self, index, begin, data):
-        #write data to file
-        with open(self.filename, 'r+b') as f:
-            f.seek(index*self.piece_len+begin)
-            f.write(data)
-            print 'piece', index, begin, 'written'
-        #update downloaded, have_blocks and have_pieces
+    def store(self, index, offset, data):
+        # store block to memory
+        self.pieces[index][self.offset_to_index(offset)] = data
+        #update bookkeeping
         self.downloaded += len(data)
-        self.have_blocks[index][begin/self.block_len] = True
+        self.have_blocks[index][offset / self.block_len] = True
+        #if the piece is finished, check its hash and write to file
         if self.have_blocks[index].count(0) == 0:
-            self.have_pieces[index] = True
+            piece = ''.join(self.pieces[index])
+            # check the hash
+            if self.piece_hashes[index] == hashlib.sha1(piece).digest():
+                #write piece to file
+                with open(self.filename, 'r+b') as f:
+                    f.seek(index * self.piece_len + offset)
+                    f.write(data)
+                    print('piece', index, offset, 'written')
+                #update bookkeeping
+                self.have_pieces[index] = True
+                del self.pieces[index]
+            else:
+                print("Hash check failed")
+                print(self.piece_hashes[index])
+                print(hashlib.sha1(piece).digest())
+                #update bookkeeping and self.pieces
+                self.pieces[index] = self.blocklist()
+                self.have_blocks[index] = BitArray(bin='0' * self.blocks_per_piece)
+                self.need_pieces[index] = True
+                self.need_blocks[index] = BitArray(bin='1' * self.blocks_per_piece)
 
     def read(self, index, begin, length):
         #currently not handling length discrepancies
@@ -110,7 +145,7 @@ class Torrent():
         #find next piece that the peer has and I don't have
         try:
             piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
-            print 'Next piece:', piece_idx, self.need_blocks[piece_idx].bin
+            print('Next piece:', piece_idx, self.need_blocks[piece_idx].bin)
             #find next block in that piece that I don't have
             block_idx = next(i for i in range(self.blocks_per_piece) if self.need_blocks[piece_idx][i] == True)
             # print block_idx
@@ -123,3 +158,5 @@ class Torrent():
         if self.need_blocks[piece_idx].count(1) == 0:
             self.need_pieces[piece_idx] = False
         return piece_idx, offset, length
+
+        # t = Torrent('C:/flagfromserver.torrent')
