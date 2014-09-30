@@ -141,18 +141,21 @@ class Torrent():
         """
         takes Torrent and Peer objects and finds the next block to download
         """
+
+        def is_last_piece(index):
+            return index == self.num_pieces
         diff = peer.pieces & self.need_pieces
-        #find next piece that the peer has and I don't have
+        # find next piece/block that the peer has and I don't have
         try:
             piece_idx = next(i for i in range(len(diff)) if diff[i] == True)
-            print('Next piece:', piece_idx, self.need_blocks[piece_idx].bin)
-            #find next block in that piece that I don't have
-            block_idx = next(i for i in range(self.blocks_per_piece) if self.need_blocks[piece_idx][i] == True)
-            # print block_idx
         except StopIteration:
             return None
+        print('Next piece:', piece_idx)
+        # find next block in that piece that I don't have
+        block_idx = next(i for i in range(self.blocks_per_piece) if self.need_blocks[piece_idx][i] == True)
         offset = block_idx * self.block_len
-        length = self.last_piece_len if piece_idx == self.last_piece else min(self.block_len, self.piece_len - offset)
+        piece_len = self.last_piece_len if is_last_piece(piece_idx) else self.piece_len
+        length = min(self.block_len, piece_len - offset)
         #update need_blocks and need_pieces
         self.need_blocks[piece_idx][block_idx] = False
         if self.need_blocks[piece_idx].count(1) == 0:
