@@ -62,7 +62,7 @@ class Torrent():
 
     def get_piece_hashes(self):
         hashes = self.info["pieces"]
-        return [hashes[i:i + 20] for i in range(len(hashes))]
+        return [hashes[i * 20:(i + 1) * 20] for i in range(len(hashes))]
 
     @property
     def left(self):
