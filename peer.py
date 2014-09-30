@@ -54,9 +54,8 @@ class Peer():
         self.sock.setblocking(False)  # make the socket non-blocking
         try:
             self.sock.connect((self.ip, self.port))  # connect
-            # except socket.error: #maybe log this
-            # print('connection failed', self.ip)
-            # set peer's status
+        except socket.error:  # maybe log this
+            pass
         finally:
             self.state = 'sending_to_wait'
 
@@ -65,7 +64,7 @@ class Peer():
         try:
             self.reply += self.sock.recv(self.MAX_MSG_LEN)
         except socket.error:
-            print(socket.error)
+            pass
         finally:
             self.process_reply()
 
@@ -95,20 +94,21 @@ class Peer():
             self.msg_queue.append(self.torrent.handshake)
             self.state = 'waiting'
             print('Enq Handshake')
-        elif not self.am_interested:
-            if (self.pieces & self.torrent.need_pieces):
-                self.am_interested = True
-                self.msg_queue.append(encode_msg('interested'))
-                print('Enq interested')
-        elif not self.is_chocking and len(self.requests) < self.MAX_REQUESTS:
-            new_request = self.torrent.get_next_request(self)
-            if new_request:
-                index, begin, length = new_request
-                self.msg_queue.append(encode_msg('request', bytes([index, begin, length])))
-                # update self.requests
-                self.requests.append((index, begin))
-                print('Enq request:', new_request)
-                #TODO: keep track of timeout, send KEEP_ALIVE messages as needed
+        elif self.state == 'connected':
+            if not self.am_interested:
+                if self.pieces & self.torrent.need_pieces:
+                    self.am_interested = True
+                    self.msg_queue.append(encode_msg('interested'))
+                    print('Enq interested')
+            elif not self.is_chocking and len(self.requests) < self.MAX_REQUESTS:
+                new_request = self.torrent.get_next_request(self)
+                if new_request:
+                    index, begin, length = new_request
+                    self.msg_queue.append(encode_msg('request', bytes([index, begin, length])))
+                    # update self.requests
+                    self.requests.append((index, begin))
+                    print('Enq request:', new_request)
+                    #TODO: keep track of timeout, send KEEP_ALIVE messages as needed
 
     def send_msg(self):
         while self.msg_queue:
@@ -125,7 +125,7 @@ class Peer():
         if self.state == "waiting_to_send":
             self.msg_queue.append(self.torrent.handshake)
         #send bitfield
-        self.msg_queue.append(encode_msg('bitfield', self.torrent.have_pieces.bytes))
+        self.msg_queue.append(encode_msg('bitfield', self.torrent.have_pieces.tobytes()))
         #update status
         self.state = "connected"
 
