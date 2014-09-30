@@ -6,7 +6,8 @@ from bitstring import BitArray
 from peer import Peer
 
 MAX_CONNECTIONS = 4
-BLOCK_LEN = 2**14
+BLOCK_LEN = 2 ** 14
+
 
 class Torrent():
     """
@@ -23,12 +24,12 @@ class Torrent():
         self.peer_id = 'liutorrent1234567890'
         self.uploaded = 0
         self.downloaded = 0
-        self.port = 6881 #how do I choose a port? randomly within the unreserved range?
-        self.filename = './'+self.info['name'] #for now, single file only
+        self.port = 6881  # how do I choose a port? randomly within the unreserved range?
+        self.filename = './' + self.info['name']  # for now, single file only
         with open(self.filename, 'wb') as f:
             pass
-        #handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
-        self.handshake = ''.join([chr(19), 'BitTorrent protocol', chr(0)*8, self.info_hash, self.peer_id])
+        # handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
+        self.handshake = ''.join([chr(19), 'BitTorrent protocol', chr(0) * 8, self.info_hash, self.peer_id])
 
         self.length = self.info['length'] if 'length' in self.info.keys() \
             else sum([f['length'] for f in self.info['files']])
@@ -36,17 +37,17 @@ class Torrent():
         self.block_len = BLOCK_LEN
 
         self.last_piece_len = self.length % self.piece_len
-        self.num_pieces = self.length/self.piece_len + 1 * (self.last_piece_len != 0)
+        self.num_pieces = self.length / self.piece_len + 1 * (self.last_piece_len != 0)
         self.last_piece = self.num_pieces - 1
         self.last_block_len = self.piece_len % self.block_len
         self.blocks_per_piece = self.piece_len / self.block_len + 1 * (self.last_block_len != 0)
         #Pieces/need_blocks data: need_pieces BitArray represents the pieces that I need and have not requested;
         #need_blocks is a list of BitArray, each of which keeps track of blocks not yet requested
-        self.need_pieces = BitArray(bin='1'*self.num_pieces)
-        self.need_blocks = [BitArray(bin='1'*self.blocks_per_piece) for i in range(self.num_pieces)]
-        self.have_pieces = BitArray(bin='0'*self.num_pieces)
-        self.have_blocks = [BitArray(bin='0'*self.blocks_per_piece) for i in range(self.num_pieces)]
-        self.pieces = {}  # index : array of blocks
+        self.need_pieces = BitArray(bin='1' * self.num_pieces)
+        self.need_blocks = [BitArray(bin='1' * self.blocks_per_piece) for i in range(self.num_pieces)]
+        self.have_pieces = BitArray(bin='0' * self.num_pieces)
+        self.have_blocks = [BitArray(bin='0' * self.blocks_per_piece) for i in range(self.num_pieces)]
+        self.pieces = defaultdict(self.blocklist)  # index : array of blocks
         self.piece_hashes = self.get_piece_hashes()
 
         self.info_from_tracker = self.update_info_from_tracker()
@@ -55,7 +56,6 @@ class Torrent():
 
         self.num_connected = 0
         self.max_connections = MAX_CONNECTIONS
-        self.requests = defaultdict(self.blocklist)
 
     def blocklist(self):
         return [[] for i in range(self.blocks_per_piece)]
@@ -79,14 +79,14 @@ class Torrent():
         return index * self.block_len
 
     def get_params(self):
-        return {'info_hash':self.info_hash,
-                'peer_id':self.peer_id,
-                'uploaded':self.uploaded,
-                'downloaded':self.downloaded,
-                'port':self.port,
+        return {'info_hash': self.info_hash,
+                'peer_id': self.peer_id,
+                'uploaded': self.uploaded,
+                'downloaded': self.downloaded,
+                'port': self.port,
                 'left': self.left,
-                'compact':1,
-                'event':'started'}
+                'compact': 1,
+                'event': 'started'}
 
     def update_info_from_tracker(self):
         tracker_response = requests.get(self.announce, params=self.get_params())
@@ -96,16 +96,16 @@ class Torrent():
         peer_bytes = [ord(byte) for byte in self.info_from_tracker['peers']]
         # assert len(peer_bytes)%6 == 0
         peers = deque()
-        for i in range(len(peer_bytes)/6):
-            ip = '.'.join([str(byte) for byte in peer_bytes[i*6:i*6+4]])
-            port = peer_bytes[i*6+4]*256+peer_bytes[i*6+5]
+        for i in range(len(peer_bytes) / 6):
+            ip = '.'.join([str(byte) for byte in peer_bytes[i * 6:i * 6 + 4]])
+            port = peer_bytes[i * 6 + 4] * 256 + peer_bytes[i * 6 + 5]
             peers.append(Peer(self, ip, port))
         return peers
 
     def store(self, index, offset, data):
         # store block to memory
         self.pieces[index][self.offset_to_index(offset)] = data
-        #update bookkeeping
+        # update bookkeeping
         self.downloaded += len(data)
         self.have_blocks[index][offset / self.block_len] = True
         #if the piece is finished, check its hash and write to file
@@ -132,9 +132,9 @@ class Torrent():
                 self.need_blocks[index] = BitArray(bin='1' * self.blocks_per_piece)
 
     def read(self, index, begin, length):
-        #currently not handling length discrepancies
+        # currently not handling length discrepancies
         with open(self.filename, 'r+b') as f:
-            f.seek(index*self.piece_len+begin)
+            f.seek(index * self.piece_len + begin)
             return f.read(length)
 
     def get_next_request(self, peer):
@@ -144,6 +144,7 @@ class Torrent():
 
         def is_last_piece(index):
             return index == self.num_pieces
+
         diff = peer.pieces & self.need_pieces
         # find next piece/block that the peer has and I don't have
         try:
@@ -156,7 +157,7 @@ class Torrent():
         offset = block_idx * self.block_len
         piece_len = self.last_piece_len if is_last_piece(piece_idx) else self.piece_len
         length = min(self.block_len, piece_len - offset)
-        #update need_blocks and need_pieces
+        # update need_blocks and need_pieces
         self.need_blocks[piece_idx][block_idx] = False
         if self.need_blocks[piece_idx].count(1) == 0:
             self.need_pieces[piece_idx] = False
