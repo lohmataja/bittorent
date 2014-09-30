@@ -21,7 +21,7 @@ class Downloader():
 
     def add_peer(self):
         # TODO: accept connection
-        #connect to a new peer
+        # connect to a new peer
         peer = self.torrent.peers.pop()  # get a new peer
         peer.connect()
         self.inputs.append(peer)
@@ -33,11 +33,11 @@ class Downloader():
         self.outputs.remove(peer)
         # put the peer in the back of the torrent's queue of peers
         self.torrent.peers.appendleft(peer)
-        #reset peer's values and queues
+        # reset peer's values and queues
         peer.teardown()
 
     def main_loop(self):
-        while self.torrent.is_incomplete:  # TODO: rename better
+        while self.torrent.is_incomplete:
             while len(self.inputs) < self.torrent.max_connections and self.torrent.peers:
                 self.add_peer()
 
@@ -46,10 +46,11 @@ class Downloader():
             for peer in to_read:
                 peer.read()
             for peer in to_write:
-                peer.store()
+                peer.write()
             for peer in errors:
                 self.remove(peer)
 
+
 tor_f = 'C:/flagfromserver.torrent'
 d = Downloader(tor_f)
-# d.main_loop()
+d.main_loop()
