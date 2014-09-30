@@ -143,7 +143,7 @@ class Torrent():
         """
 
         def is_last_piece(index):
-            return index == self.num_pieces
+            return index == self.num_pieces - 1
 
         diff = peer.pieces & self.need_pieces
         # find next piece/block that the peer has and I don't have
