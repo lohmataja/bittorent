@@ -104,30 +104,32 @@ class Peer():
                 new_request = self.torrent.get_next_request(self)
                 if new_request:
                     index, begin, length = new_request
-                    self.msg_queue.append(encode_msg('request', bytes([index, begin, length])))
+                    self.msg_queue.append(encode_msg('request', struct.pack('>III', index, begin, length)))
                     # update self.requests
                     self.requests.append((index, begin))
                     print('Enq request:', new_request)
-                    #TODO: keep track of timeout, send KEEP_ALIVE messages as needed
+                    # TODO: keep track of timeout, send KEEP_ALIVE messages as needed
 
     def send_msg(self):
         while self.msg_queue:
             try:
                 self.sock.sendall(self.msg_queue[0])
-                self.msg_queue.popleft()
             except socket.error:
                 break
+            self.msg_queue.popleft()
+
 
     def process_handshake(self, handshake):
         # TODO: verify peer_handshake
-        print('Received handshake', handshake)
-        #send h/sh as needed:
+        print 'Received handshake from', self.ip, handshake
+        # send h/sh as needed:
         if self.state == "waiting_to_send":
             self.msg_queue.append(self.torrent.handshake)
         #send bitfield
         self.msg_queue.append(encode_msg('bitfield', self.torrent.have_pieces.tobytes()))
         #update status
         self.state = "connected"
+        print "Connected to", self.ip
 
     def process_msg(self, msg_str):
         msg = struct.unpack('B', msg_str[0])[0]
@@ -136,7 +138,7 @@ class Peer():
         if msg == 0:
             self.is_chocking = True
 
-        #unchoke
+        # unchoke
         elif msg == 1:
             self.is_chocking = False
 
