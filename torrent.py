@@ -27,9 +27,6 @@ class Torrent():
         self.downloaded = 0
         self.port = 6881  # how do I choose a port? randomly within the unreserved range?
         self.filename = os.path.join(os.getcwd(), self.info['name'].decode('utf-8'))  # for now, single file only
-        # self.filename = self.info['name']
-        with open(self.filename, 'wb') as f:
-            pass
         # handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
         self.handshake = ''.join([chr(19), 'BitTorrent protocol', chr(0) * 8, self.info_hash, self.peer_id])
 
@@ -51,6 +48,7 @@ class Torrent():
         self.have_blocks = [BitArray(bin='0' * self.blocks_per_piece) for i in range(self.num_pieces)]
         self.pieces = defaultdict(self.blocklist)  # index : array of blocks
         self.piece_hashes = self.get_piece_hashes()
+        self.initialize_file(self.filename)
 
         self.info_from_tracker = self.update_info_from_tracker()
         self.peers = self.get_peers()
@@ -66,6 +64,21 @@ class Torrent():
         hashes = self.info["pieces"]
         return [hashes[i * 20:(i + 1) * 20] for i in range(len(hashes))]
 
+    def initialize_file(self, filename):
+        if not os.path.exists(filename):
+            with open(filename, 'wb') as f:
+                pass
+        else:
+            self.check_file(filename)
+
+    def check_file(self, filename):
+        with open(filename, 'rb') as f:
+            content = f.read()
+            for i in range(self.num_pieces):
+                if hashlib.sha1(content[i * self.piece_len:(i + 1) * self.piece_len]).digest() == self.piece_hashes[i]:
+                    self.need_pieces[i] = False  # don't even need to update self.need_blocks
+                    self.have_pieces[i] = True
+        print self.need_pieces.bin, self.have_pieces.bin
     @property
     def left(self):
         return self.length - self.downloaded
