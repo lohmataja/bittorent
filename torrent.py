@@ -1,6 +1,7 @@
 import bencoding
 import hashlib
 import requests
+import os
 from collections import deque, defaultdict
 from bitstring import BitArray
 from peer import Peer
@@ -25,7 +26,8 @@ class Torrent():
         self.uploaded = 0
         self.downloaded = 0
         self.port = 6881  # how do I choose a port? randomly within the unreserved range?
-        self.filename = './' + self.info['name']  # for now, single file only
+        self.filename = os.path.join(os.getcwd(), self.info['name'].decode('utf-8'))  # for now, single file only
+        # self.filename = self.info['name']
         with open(self.filename, 'wb') as f:
             pass
         # handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
@@ -38,7 +40,7 @@ class Torrent():
 
         self.last_piece_len = self.length % self.piece_len
         self.num_pieces = self.length / self.piece_len + 1 * (self.last_piece_len != 0)
-        self.last_piece = self.num_pieces - 1
+        self.last_piece = self.num_pieces - 1  # TODO: do I need that?
         self.last_block_len = self.piece_len % self.block_len
         self.blocks_per_piece = self.piece_len / self.block_len + 1 * (self.last_block_len != 0)
         #Pieces/need_blocks data: need_pieces BitArray represents the pieces that I need and have not requested;
@@ -157,6 +159,8 @@ class Torrent():
         offset = block_idx * self.block_len
         piece_len = self.last_piece_len if is_last_piece(piece_idx) else self.piece_len
         length = min(self.block_len, piece_len - offset)
+        if length < 0:
+            return None
         # update need_blocks and need_pieces
         self.need_blocks[piece_idx][block_idx] = False
         if self.need_blocks[piece_idx].count(1) == 0:
